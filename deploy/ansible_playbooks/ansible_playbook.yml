@@ -1,0 +1,361 @@
+---
+#run an ansible playbook from this directory
+- hosts: #PUBLIC_IP_AWS_EC2_INSTANCE_WITH_TERRAFORM
+  become: yes
+
+
+  vars:
+    passwd: "{{ lookup('password', '/dev/null', length=15, chars=['ascii_letters', 'digits']) }}"
+
+  tasks:
+
+    - name: Create group khomp
+      ansible.builtin.group:
+        name: khomp
+        state: present
+  
+    - name: Create user khomp and add sudo group generate SSH key for user khomp in ~khmop/.ssh/id_rsa
+      ansible.builtin.user:
+        name: khomp
+        groups: 
+          - sudo
+          - khomp
+        password: "{{passwd | password_hash('sha512') }}"
+  
+    - name: Create credentials user khomp file
+      ansible.builtin.copy:
+        dest: "../terraform\ _files/TERRAFORM_FILES_VM/credentials"
+        owner: root
+        group: root
+        mode: 0600
+        content: |
+          user: khomp
+          pass: "{{passwd}}"
+      delegate_to: 127.0.0.1
+  
+    - name: Config Sudoers ubuntu user
+      ansible.builtin.lineinfile:
+        path: /etc/sudoers
+        regexp: 'root    ALL=(ALL:ALL) ALL'
+        insertafter: 'root    ALL=(ALL:ALL) ALL'
+        line: 'ubuntu    ALL=(ALL:ALL) NOPASSWD: ALL'
+  
+    - name: Config Sudoers khomp user 
+      ansible.builtin.lineinfile:
+        path: /etc/sudoers
+        regexp: 'ubuntu    ALL=(ALL:ALL) NOPASSWD: ALL'
+        insertafter: 'ubuntu    ALL=(ALL:ALL) NOPASSWD: ALL'
+        line: 'khomp    ALL=(ALL:ALL) NOPASSWD: ALL'
+  
+    - name: Create dir ssh for user khomp
+      ansible.builtin.file:
+        path: /home/khomp/.ssh/
+        owner: khomp
+        group: khomp
+        mode: 0700
+        state: directory
+  
+    - name: Generate key pair for user khomp
+      community.crypto.openssh_keypair:
+        path: /home/khomp/.ssh/khomp-key
+        force: true
+        backend: opensshbin
+        group: khomp
+        owner: khomp
+        mode: 0600
+  
+    - name: Create file authorized_keys for user khomp
+      ansible.builtin.file:
+        path: /home/khomp/.ssh/authorized_keys
+        owner: khomp
+        group: khomp
+        mode: 0600
+        state: touch
+  
+    - name: Add public key in authorized_keys
+      ansible.builtin.shell: 
+        cmd: "cat /home/khomp/.ssh/khomp-key.pub >> /home/khomp/.ssh/authorized_keys"
+  
+    - name: Cat public key 
+      ansible.builtin.command: 
+        cmd: "cat /home/khomp/.ssh/khomp-key.pub"
+      register: khomp_key_pub
+  
+    - name: Copy khomp-key.pub user khomp
+      ansible.builtin.copy:
+        dest: "../terraform\ _files/TERRAFORM_FILES_VM/khomp-key.pub"
+        owner: root
+        group: root
+        mode: 0600
+        content: |
+          "{{khomp_key_pub.stdout_lines  | replace("'","") | replace ("[", "") | replace ("]", "")}}"
+      delegate_to: 127.0.0.1
+  
+    - name: Cat key
+      ansible.builtin.command: 
+        cmd: "cat /home/khomp/.ssh/khomp-key"
+      register: khomp_key_key
+  
+    - name: Copy khomp-key user khomp
+      ansible.builtin.copy:
+        dest: "../terraform\ _files/TERRAFORM_FILES_VM/khomp-key"
+        owner: root
+        group: root
+        mode: 0600
+        content: |
+          "{{khomp_key_key.stdout_lines | replace("'","") | replace ("[", "") | replace ("]", "")}}"
+      delegate_to: 127.0.0.1
+  
+    - name: Format keys
+      ansible.builtin.shell: 
+        cmd: "sed -i 's/, /\\n/g' khomp-key && sed -i 's/\"//g' khomp-key && sed -i 's/\"//g' khomp-key.pub"
+        chdir: "../terraform\ _files/TERRAFORM_FILES_VM/"
+      delegate_to: 127.0.0.1
+  
+    - name: Destroy key files
+      ansible.builtin.file:
+        path: "/home/khomp/.ssh/{{ item }}"
+        state: absent 
+      loop:
+        - khomp-key
+        - khomp-key.pub
+  
+    - name: Config sshd_config khomp user 
+      ansible.builtin.lineinfile:
+        path: /etc/sudoers
+        regexp: 'UsePAM yes'
+        insertafter: 'ubuntu    ALL=(ALL:ALL) NOPASSWD: ALL'
+        line: 'khomp    ALL=(ALL:ALL) NOPASSWD: ALL'
+  
+    - name: stats sshd_config
+      stat: 
+        path: /etc/ssh/sshd_config
+      register: sshd_config
+  
+    - name: Configure sshd_config file
+      block:
+        
+        - name: Disable UserEnvironment 
+          ansible.builtin.replace:
+            path: /etc/ssh/sshd_config
+            regexp: '(#|){1}PermitUserEnvironment (yes|no)'
+            replace: 'PermitUserEnvironment no'
+        
+        - name: Disable PasswordAuthentication
+          ansible.builtin.replace:
+            path: /etc/ssh/sshd_config
+            regexp: '(#|){1}PasswordAuthentication (yes|no)'
+            replace: 'PasswordAuthentication no'
+        
+        - name: Disable EmptyPasswords
+          ansible.builtin.replace:
+            path: /etc/ssh/sshd_config
+            regexp: '(#|){1}PermitEmptyPasswords (yes|no)'
+            replace: 'PermitEmptyPasswords no'
+        
+        - name: Disable ChallengeResponseAuthentication
+          ansible.builtin.replace:
+            path: /etc/ssh/sshd_config
+            regexp: '(#|){1}ChallengeResponseAuthentication (yes|no)'
+            replace: 'ChallengeResponseAuthentication no'
+        
+        - name: Enable PubkeyAuthentication yes
+          ansible.builtin.replace:
+            path: /etc/ssh/sshd_config
+            regexp: '(#|){1}PubkeyAuthentication (yes|no)'
+            replace: 'PubkeyAuthentication yes'
+      
+      when: "sshd_config.stat.exists"
+      ignore_errors: true 
+  
+    - name: stats ssh_config
+      stat: 
+        path: /etc/ssh/ssh_config
+      register: ssh_config
+  
+    - name: Configure sshd_config file
+      block:
+        
+        - name: Disable PasswordAuthentication
+          ansible.builtin.replace:
+            path: /etc/ssh/sshd_config
+            regexp: '(#|){1}   PasswordAuthentication (yes|no)'
+            replace: '   PasswordAuthentication no'
+        
+        - name: Disable HashKnownHosts
+          ansible.builtin.replace:
+            path: /etc/ssh/sshd_config
+            regexp: '(#|){1}    HashKnownHosts yes (yes|no)'
+            replace: '    HashKnownHosts yes'
+  
+      when: "ssh_config.stat.exists"
+      ignore_errors: true 
+  
+    - name: Restart service ssh
+      ansible.builtin.service:
+        name: ssh
+        state: restarted
+
+    - name: Copy manifests
+      ansible.builtin.copy:
+        dest: "/home/ubuntu/{{ item }}"
+        src: "../kubernets_manifests/{{ item }}"
+      loop:
+        - pv.yml
+        - nginx-configmap.yml
+        - nginx-service.yml
+        - nginx.yml
+
+    - name: Copy dependecies.sh
+      ansible.builtin.copy:
+        dest: "/home/ubuntu/dependencies.sh"
+        src: "../terraform\ _files/TERRAFORM_FILES_VM/dependencies.sh"
+        mode: 0750 
+
+    - name: Exec shell 
+      block:
+        
+        - name: Exec script
+          ansible.builtin.shell: 
+            cmd: "bash dependencies.sh"
+            chdir: "/home/ubuntu"
+            
+        - name: Exec command for docker repo
+          ansible.builtin.shell: 
+            cmd: "curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -"
+            chdir: "/home/ubuntu"
+
+        - name: Exec command echo docker repo
+          ansible.builtin.shell: 
+            cmd: "add-apt-repository \"deb [arch=amd64] https://download.docker.com/linux/ubuntu bionic stable\""
+            chdir: "/home/ubuntu"
+        
+        - name: Exec command for update and install docker
+          ansible.builtin.shell: 
+            cmd: "apt-get update -y && apt-get install -y docker-ce && usermod -aG docker ubuntu"
+            chdir: "/home/ubuntu"
+
+        - name: Reset ssh connection to allow user changes to affect ansible user
+          ansible.builtin.meta:
+            reset_connection
+
+        - name: Exec command for kubectl
+          ansible.builtin.shell: 
+            cmd: "curl -LO \"https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl\""
+            chdir: "/home/ubuntu"
+
+        - name: Exec command for kubectl sha
+          ansible.builtin.shell: 
+            cmd: "curl -LO \"https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl.sha256\""
+            chdir: "/home/ubuntu"
+
+        - name: Exec command for kubectl echo sha
+          ansible.builtin.shell: 
+            cmd: "echo \"$(cat kubectl.sha256)  kubectl\" | sha256sum --check"
+            chdir: "/home/ubuntu"
+
+        - name: Exec command for install kubectl
+          ansible.builtin.shell: 
+            cmd: "sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl"
+            chdir: "/home/ubuntu"
+
+        - name: Exec command for download bin minikube
+          ansible.builtin.shell: 
+            cmd: "curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube_latest_amd64.deb"
+            chdir: "/home/ubuntu"
+
+        - name: Exec command for download install minikube
+          ansible.builtin.command:
+            cmd: "sudo dpkg -i minikube_latest_amd64.deb"
+          args:
+            chdir: "/home/ubuntu"
+          become: yes
+          become_user: ubuntu  
+
+        - name: Exec command for permissions minikube
+          ansible.builtin.shell: 
+            cmd: "mkdir /home/ubuntu/.minikube && sudo chown -R ubuntu /home/ubuntu/.minikube && chmod -R u+wrx /home/ubuntu/.minikube"
+            chdir: "/home/ubuntu"
+
+        - name: Exec command for start minikube
+          ansible.builtin.command: 
+            cmd: "minikube start"
+          args:
+            chdir: "/home/ubuntu"
+          become: yes
+          become_user: ubuntu
+
+        - name: Exec command for start pods 
+          ansible.builtin.command: 
+            cmd: "kubectl apply -f {{ item }}"
+          args:
+            chdir: "/home/ubuntu"
+          become: yes
+          become_user: ubuntu
+          loop:
+            - pv.yml
+            - nginx-configmap.yml
+            - nginx-service.yml
+            - nginx.yml
+
+      ignore_errors: true 
+
+
+    - name: Install dependencies
+      ansible.builtin.apt:
+        name: aptitude
+        update_cache: yes
+        state: "latest"
+        force_apt_get: yes
+  
+    - name: Install apache httpd  (state=present is optional)
+      ansible.builtin.apt:
+        name: apache2
+        state: "latest"
+        update_cache: yes
+  
+    - name: Create document root
+      file:
+        path: "/var/www/ubuntu-domain"
+        state: directory
+        owner: "ubuntu"
+        mode: '0755'
+  
+    - name: Generate index template
+      template:
+        src: "./templates/index.html.j2"
+        dest: "/var/www/ubuntu-domain/index.html"
+
+    - name: Generate appache.conf template
+      template:
+        src: "./templates/apache.conf.j2"
+        dest: "/etc/apache2/sites-available/ubuntu-domain.conf"
+
+    - name: Enable new site
+      ansible.builtin.shell: /usr/sbin/a2ensite ubuntu-domain.conf
+      notify: Reload Apache
+
+    - name: Disable default Apache
+      ansible.builtin.shell: /usr/sbin/a2dissite 000-default.conf
+      notify: Reload Apache
+      ignore_errors: true
+
+    - name: "UFW - Allow HTTP on port 80"
+      community.general.ufw:
+        rule: allow
+        port: "80"
+        proto: tcp
+
+  handlers:
+    - name: Reload Apache
+      service:
+        name: apache2
+        state: reloaded
+
+    - name: Restart Apache
+      service:
+        name: apache2
+        state: restarted
+
+
+...
