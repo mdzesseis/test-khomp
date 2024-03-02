@@ -8,8 +8,9 @@ touch ./deploy.log
 clear 
 MENU="
 ================================================
-1 - Deploy Terraform
-2 - Generate Key SSH
+1 - Deploy
+2 - Destroy
+3 - Generate Key SSH
 ================================================
 "
 
@@ -53,11 +54,48 @@ case "$OPTION" in
    [ $? -ne 0 ] && echo "ERROR!" && exit;
 
    echo "Successful!"
-   echo IP of instanve in deploy.log
     
 ;;
 
 2) 
+
+  cd ../terraform\ _files/TERRAFORM_FILES_VM/
+  export "AWS_ACCESS_KEY_ID=$KEY_ID" 
+  export "AWS_SECRET_ACCESS_KEY=$SECRET_KEY"
+  `terraform init >> ../../bash/deploy.log`
+   [ $? -ne 0 ] && echo "ERROR!" && exit;
+  `terraform plan -out plan.out >> ../../bash/deploy.log`
+   [ $? -ne 0 ] && echo "ERROR!" && exit;
+  `terraform destroy -auto-approve >> ../../bash/deploy.log`
+
+   [ $? -ne 0 ] && echo "ERROR!" && exit;
+  
+  cd ../TERRAFORM_FILES_AWS_VPC/
+  export "AWS_ACCESS_KEY_ID=$KEY_ID" 
+  export "AWS_SECRET_ACCESS_KEY=$SECRET_KEY"
+  `terraform init >> ../../bash/deploy.log`
+   [ $? -ne 0 ] && echo "ERROR!" && exit;
+  `terraform plan -out plan.out >> ../../bash/deploy.log`
+   [ $? -ne 0 ] && echo "ERROR!" && exit; 
+  `terraform destroy -auto-approve >> ../../bash/deploy.log`
+   
+   [ $? -ne 0 ] && echo "ERROR!" && exit;  
+  
+  cd ../TERRAFORM_FILES_BUCKET_REMOTE_STATE/
+  export "AWS_ACCESS_KEY_ID=$KEY_ID" 
+  export "AWS_SECRET_ACCESS_KEY=$SECRET_KEY"
+  `terraform init >> ../../bash/deploy.log`
+   [ $? -ne 0 ] && echo "ERROR!" && exit;
+  `terraform plan -out plan.out >> ../../bash/deploy.log`
+   [ $? -ne 0 ] && echo "ERROR!" && exit;
+  `terraform destroy -auto-approve  >> ../../bash/deploy.log`
+   [ $? -ne 0 ] && echo "ERROR!" && exit;
+
+   echo "Successful" 
+;;
+
+3)
+ 
 cd ../terraform\ _files/TERRAFORM_FILES_VM/
 yes aws-vm-key | ssh-keygen  -N '' >/dev/null
 [ $? -ne 0 ] && echo "ERROR!" && exit;
